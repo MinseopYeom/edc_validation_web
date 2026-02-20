@@ -187,6 +187,128 @@ def process_data_final(excel_file, sheet_name, header_row):
 
 def save_to_template(template_path, df_doc, df_edc, ver_info):
     """
+    템플릿 저장 함수 (버전 텍스트 덮어쓰기 수정 + 순서 유지 기능 추가)
+    """
+    if not os.path.exists(template_path): return None
+    wb = load_workbook(template_path)
+    
+    # -----------------------------------------------------------
+    # [수정 1] Cover Page: 텍스트 자체를 교체 (A열 덮어쓰기)
+    # -----------------------------------------------------------
+    if 'Cover Page' in wb.sheetnames:
+        ws_cover = wb['Cover Page']
+        
+        # 검색할 라벨 키워드와 사용자가 입력한 값 매핑
+        cover_mapping = [
+            ("Blank eCRF Version", ver_info['blank']),
+            ("Database Specifications Version", ver_info['db']),
+            ("Annotated CRF Version", ver_info['annotated'])
+        ]
+        
+        # A열(1열)을 훑으며 라벨이 포함된 셀을 찾으면 -> 내용을 통째로 교체
+        for r in range(1, 50):
+            cell = ws_cover.cell(row=r, column=1)
+            cell_val = str(cell.value or "")
+            
+            for label, user_input in cover_mapping:
+                if label in cell_val:
+                    cell.value = f"{label}: {user_input}"
+
+    # -----------------------------------------------------------
+    # [수정 2] Entry Screen Validation: 병합된 A열 강제 덮어쓰기
+    # -----------------------------------------------------------
+    target_sheet = 'Entry Screen Validation'
+    if target_sheet not in wb.sheetnames: return None
+    ws = wb[target_sheet]
+    
+    # 병합된 셀(A2:O2)의 주인이 A2이므로, A2에 전체 텍스트를 덮어씁니다.
+    ws['A2'].value = f"Blank eCRF Version: {ver_info['blank']}"
+    ws['A3'].value = f"Database Specifications Version: {ver_info['db']}"
+    ws['A4'].value = f"Annotated CRF Version: {ver_info['annotated']}"
+
+    # -----------------------------------------------------------
+    # [기존 로직 유지 + 순서 보존 로직 추가] 데이터 비교 및 조건부 서식
+    # -----------------------------------------------------------
+    
+    # 스타일 정의
+    red_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid") # 연분홍
+    thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+    align_center = Alignment(horizontal='center', vertical='center', wrap_text=True)
+
+    # 👉 [추가된 로직 1] 기준 문서(df_doc)의 원본 행 순서 기억하기
+    df_doc['ORIGINAL_ORDER'] = range(len(df_doc))
+
+    # 데이터 병합 (how='outer')
+    merged = pd.merge(df_doc, df_edc, on='JOIN_KEY', how='outer', suffixes=('_Doc', '_EDC'), indicator=True)
+    
+    # 👉 [추가된 로직 2] 기억해둔 원본 순서대로 재정렬 (EDC에만 있는 값은 마지막에 배치)
+    merged = merged.sort_values(by=['ORIGINAL_ORDER'], na_position='last')
+    
+    # 👉 [추가된 로직 3] 정렬 후 불필요해진 임시 컬럼 삭제
+    merged = merged.drop(columns=['ORIGINAL_ORDER'])
+
+    cols = ['DOMAIN', 'DOMAIN LABEL', 'PAGE', 'PAGE LABEL', 'VISIT', 'ITEM ID', 'ITEM LABEL', 'ITEM SEQ', 'VERSION', 'CODE', 'LAYOUT', 'TYPE', 'MAX_LEN', 'MIN_VAL', 'MAX_VAL']
+
+    # 데이터 시작 행: 7행
+    start_row = 7
+    
+    # 👉 [추가된 로직 4] 정렬로 인해 섞인 인덱스를 초기화(reset_index)한 후 반복문 실행
+    for i, row in merged.reset_index(drop=True).iterrows():
+        curr_r = start_row + i
+        status = row['_merge']
+        
+        doc_vals = [row[f"{c}_Doc"] for c in cols] if status != 'right_only' else [""] * 15
+        edc_vals = [row[f"{c}_EDC"] for c in cols] if status != 'left_only' else [""] * 15
+        
+        mismatches = []
+        if status == 'both':
+            for idx, cname in enumerate(cols):
+                if doc_vals[idx] != edc_vals[idx]: mismatches.append(cname)
+
+        res_text = "True"
+        is_false = False
+        
+        if status == 'left_only' or status == 'right_only':
+            res_text = "False"
+            is_false = True
+        elif mismatches:
+            res_text = "False"
+            is_false = True
+
+        # 1. Document Area (Col 1~15)
+        for idx, val in enumerate(doc_vals):
+            cell = ws.cell(row=curr_r, column=idx+1)
+            cell.value = val
+            cell.border = thin_border
+            cell.alignment = align_center
+            
+            if is_false:
+                if status == 'left_only': cell.fill = red_fill
+                elif status == 'both' and cols[idx] in mismatches: cell.fill = red_fill
+
+        # 2. EDC Area (Col 16~30 / P~AD)
+        for idx, val in enumerate(edc_vals):
+            cell = ws.cell(row=curr_r, column=idx+16)
+            cell.value = val
+            cell.border = thin_border
+            cell.alignment = align_center
+            
+            if is_false:
+                if status == 'right_only': cell.fill = red_fill
+                elif status == 'both' and cols[idx] in mismatches: cell.fill = red_fill
+
+        # 3. Result Area (Col 31 / AE)
+        cell_res = ws.cell(row=curr_r, column=31)
+        cell_res.value = res_text
+        cell_res.border = thin_border
+        cell_res.alignment = align_center
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return output
+    
+    """
     템플릿 저장 함수 (버전 텍스트 덮어쓰기 수정)
     """
     if not os.path.exists(template_path): return None
