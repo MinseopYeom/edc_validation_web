@@ -295,7 +295,7 @@ col_u1, col_u2 = st.columns(2)
 with col_u1:
     doc_file_up = st.file_uploader("📂 기준 문서 (DB Spec)", type=['xlsx', 'xls'], key="doc")
 with col_u2:
-    edc_file_up = st.file_uploader("📂 비교 대상 (EDC Export)", type=['xlsx', 'xls'], key="edc")
+    edc_file_up = st.file_uploader("📂 비교 대상 (CDMS Export)", type=['xlsx', 'xls'], key="edc")
 
 if doc_file_up and edc_file_up:
     st.markdown("---")
