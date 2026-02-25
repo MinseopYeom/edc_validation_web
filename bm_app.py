@@ -274,7 +274,12 @@ def build_dataset_long(dataset_excel: pd.ExcelFile, meta_cols: list) -> pd.DataF
                 if pd.isna(val) or str(val).strip() == '' or str(val).strip().lower() == 'nan':
                     continue
                 # 값이 있는 대상자 발견
-                found_type = dtype_to_type_str(col_series.dtype)
+
+                # 각 값의 type으로 템플릿에 입력
+                # found_type = dtype_to_type_str(col_series.dtype)
+
+                found_type = str(val).strip() # type에 실제값 그대로 사용
+
                 if subjid_col_raw is not None:
                     subj_val = df[subjid_col_raw].iloc[idx]
                     found_subjid = str(subj_val).strip() if pd.notna(subj_val) else ''
