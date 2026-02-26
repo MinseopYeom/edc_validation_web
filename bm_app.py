@@ -20,7 +20,7 @@ TEMPLATE_PATH = 'EDC Validation_template.xlsx'
 # ============================================================
 SYS_LAYOUT_WHITELIST = [
     "SUBJID",
-    # 예시: 추후 추가할 경우 포함시킬 ITEM ID 기재
+    # "SITEID",  # 예시: 추후 추가할 경우 이런 식으로 등록
 ]
 
 # ============================================================
@@ -28,9 +28,9 @@ SYS_LAYOUT_WHITELIST = [
 # Dataset의 모든 시트에 공통으로 포함되는 관리용 컬럼들입니다.
 # ============================================================
 DATASET_META_COLUMNS = [
-    # "SUBJID",
-    # "VISIT",
-    # "SEQ",
+    "SUBJID",
+    "VISIT",
+    "SEQ",
 ]
 # ============================================================
 
@@ -274,12 +274,7 @@ def build_dataset_long(dataset_excel: pd.ExcelFile, meta_cols: list) -> pd.DataF
                 if pd.isna(val) or str(val).strip() == '' or str(val).strip().lower() == 'nan':
                     continue
                 # 값이 있는 대상자 발견
-
-                # 각 값의 type으로 템플릿에 입력
-                # found_type = dtype_to_type_str(col_series.dtype)
-
-                found_type = str(val).strip() # type에 실제값 그대로 사용
-
+                found_type = dtype_to_type_str(col_series.dtype)
                 if subjid_col_raw is not None:
                     subj_val = df[subjid_col_raw].iloc[idx]
                     found_subjid = str(subj_val).strip() if pd.notna(subj_val) else ''
@@ -454,6 +449,36 @@ def save_to_template(template_path, df_doc, df_edc, ver_info,
         return None
 
     wb = load_workbook(template_path)
+
+    # ── 버전 정보 기입 ────────────────────────────────────────
+    # Entry Screen Validation 시트: A2(Blank), A3(DB Spec), A4(Annotated)
+    # Data Structure Validation 시트: A2(DB Spec)
+    # 형식 예시: "Blank eCRF Version: V1.1" → "V" + 입력값으로 치환
+    def write_version(ws, row, col, label_prefix, ver_value):
+        """기존 셀 텍스트에서 버전 부분만 교체하여 기입"""
+        cell = ws.cell(row=row, column=col)
+        ver_str = f"V{ver_value}" if not str(ver_value).upper().startswith('V') else str(ver_value)
+        cell.value = f"{label_prefix}{ver_str}"
+
+    entry_ws = wb['Entry Screen Validation'] if 'Entry Screen Validation' in wb.sheetnames else None
+    ds_ws    = wb['Data Structure Validation'] if 'Data Structure Validation' in wb.sheetnames else None
+
+    if entry_ws:
+        write_version(entry_ws, row=2, col=1,
+                      label_prefix="Blank eCRF Version: ",
+                      ver_value=ver_info.get('blank', ''))
+        write_version(entry_ws, row=3, col=1,
+                      label_prefix="Database Specifications Version: ",
+                      ver_value=ver_info.get('db', ''))
+        write_version(entry_ws, row=4, col=1,
+                      label_prefix="Annotated CRF Version: ",
+                      ver_value=ver_info.get('annotated', ''))
+
+    if ds_ws:
+        write_version(ds_ws, row=2, col=1,
+                      label_prefix="Database Specifications Version: ",
+                      ver_value=ver_info.get('db', ''))
+    # ─────────────────────────────────────────────────────────
 
     # ── Entry Screen Validation ───────────────────────────────
     target_sheet = 'Entry Screen Validation'
@@ -652,10 +677,9 @@ if doc_file_up and edc_file_up:
         btn_disabled = not (doc_ready and edc_ready)
 
     if st.button("🚀 검증 시작 (Start Validation)", type="primary", disabled=btn_disabled):
-        with st.status("데이터 분석 중...", expanded=True) as status:
+        with st.status("검증 실행 중 — 잠시 기다려 주세요.", expanded=True) as status:
 
             # ── DB Spec 로드 ──────────────────────────────────
-            st.write("📖 DB Spec 로드 중...")
             df_doc_full = process_data_final(doc_excel, doc_sheet, doc_header)  # 전체 (필터 없음)
 
             if df_doc_full.empty:
@@ -663,9 +687,11 @@ if doc_file_up and edc_file_up:
                 st.error("DB Spec 데이터를 불러올 수 없습니다.")
                 st.stop()
 
+            st.write("📖 DB Spec 로드 - 완료")
+
             # ── Entry Screen: SYS_ 필터 적용 ─────────────────
-            st.write("🔍 Entry Screen 필터 적용 중...")
             df_doc_entry, df_excluded = apply_sys_layout_filter(df_doc_full.copy(), SYS_LAYOUT_WHITELIST)
+            st.write("🔍 Entry Screen SYS_ 필터 적용 - 완료")
 
             if not df_excluded.empty:
                 st.info(
@@ -679,7 +705,6 @@ if doc_file_up and edc_file_up:
                     )
 
             # ── Entry Screen: EDC Export 로드 ─────────────────
-            st.write("📖 EDC Export 로드 중...")
             df_final_edc = process_data_final(edc_excel, edc_sheet, edc_header)
 
             if df_final_edc.empty:
@@ -691,6 +716,8 @@ if doc_file_up and edc_file_up:
             df_final_edc, df_edc_excluded = apply_sys_layout_filter(
                 df_final_edc, SYS_LAYOUT_WHITELIST
             )
+            st.write("📖 EDC Export 로드 및 SYS_ 필터 적용 - 완료")
+
             if not df_edc_excluded.empty:
                 st.info(
                     f"ℹ️ EDC Export에서도 SYS_ 레이아웃으로 제외된 항목: "
@@ -700,14 +727,14 @@ if doc_file_up and edc_file_up:
             # ── Data Structure: Dataset Long format 변환 ──────
             df_dataset_long = None
             if dataset_ready:
-                st.write("🔄 CDMS Dataset → Long format 변환 중...")
                 df_dataset_long = build_dataset_long(dataset_excel, DATASET_META_COLUMNS)
                 st.write(
-                    f"   ✔ 변환 완료 — 총 **{len(df_dataset_long)}개** (Domain, Item ID) 조합 추출"
+                    f"🔄 CDMS Dataset 변환 - 완료 "
+                    f"(총 **{len(df_dataset_long)}개** Domain-Item ID 조합 추출)"
                 )
 
             # ── 템플릿에 저장 ─────────────────────────────────
-            st.write("📝 템플릿에 결과 기입 중...")
+            st.write("📝 템플릿 결과 기입 - 완료")
             ver_info    = {'blank': bv, 'db': dv, 'annotated': av}
             result_file = save_to_template(
                 TEMPLATE_PATH,
