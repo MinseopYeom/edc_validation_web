@@ -23,16 +23,7 @@ SYS_LAYOUT_WHITELIST = [
     # "SITEID",  # 예시: 추후 추가할 경우 이런 식으로 등록
 ]
 
-# ============================================================
-# [유지보수 포인트] CDMS Dataset에서 메타 컬럼으로 취급하여 Item ID에서 제외할 컬럼 목록
-# Dataset의 모든 시트에 공통으로 포함되는 관리용 컬럼들입니다.
-# ============================================================
-DATASET_META_COLUMNS = [
-    "SUBJID",
-    "VISIT",
-    "SEQ",
-]
-# ============================================================
+
 
 st.markdown("""
     <style>
@@ -210,26 +201,22 @@ def dtype_to_type_str(dtype) -> str:
         return 'text'
 
 
-def build_dataset_long(dataset_excel: pd.ExcelFile, meta_cols: list) -> pd.DataFrame:
+def build_dataset_long(dataset_excel: pd.ExcelFile) -> pd.DataFrame:
     """
     CDMS Dataset 엑셀의 모든 도메인 시트를 읽어 Long format DataFrame으로 변환합니다.
 
     변환 규칙:
     - 시트명 = DOMAIN
     - 컬럼명 'ITEMID:LABEL' → ITEM ID는 ':' 앞 부분만 추출
-    - meta_cols(SUBJID, VISIT, SEQ 등)는 Item ID 목록에서 제외
-    - 각 Item ID에 대해 '값이 실제로 존재하는(non-null)' 행을 대상자별로 우선 탐색하여
-      가장 먼저 발견된 대상자의 SUBJID와 실제 값의 dtype을 Type으로 기록
-    - 모든 대상자에게 값이 없는 경우 SUBJID = '' (빈값), Type = '' (빈값) 으로 기록
+    - 모든 컬럼을 Item ID로 처리 (제외 없음)
+    - 각 Item ID에 대해 값이 실제로 존재하는(non-null) 첫 번째 행의
+      실제 셀 값을 Type으로, 해당 행의 SUBJID를 참조 대상자로 기록
+    - 모든 대상자에게 값이 없는 경우 DS_TYPE = '', DS_SUBJID = '' 으로 기록
 
     Returns:
-        DataFrame with columns: [DOMAIN, ITEM ID, TYPE, SUBJID]
+        DataFrame with columns: [DOMAIN, ITEM ID, DS_TYPE, DS_SUBJID]
     """
-    meta_upper = {m.upper().strip() for m in meta_cols}
-
-    # SUBJECT_INFO 시트는 도메인 데이터가 아니므로 건너뜀
     skip_sheets = {'SUBJECT_INFO'}
-
     records = []
 
     for sheet in dataset_excel.sheet_names:
@@ -253,39 +240,30 @@ def build_dataset_long(dataset_excel: pd.ExcelFile, meta_cols: list) -> pd.DataF
                 subjid_col_raw = c
                 break
 
-        # 컬럼별 처리
+        # 모든 컬럼을 Item ID로 처리
         for raw_col in df.columns:
             item_id = parse_item_id(raw_col)
 
-            # 메타 컬럼 제외
-            if item_id in meta_upper:
-                continue
-
-            col_series = df[raw_col]
-
-            # 값이 있는 행 탐색 (non-null, non-empty)
-            # 각 행을 순회하면서 해당 item에 값이 있는 첫 번째 대상자를 찾음
+            col_series   = df[raw_col]
             found_subjid = ''
             found_type   = ''
 
             for idx in df.index:
                 val = col_series.iloc[idx]
-                # NaN, None, 빈문자열 제외
                 if pd.isna(val) or str(val).strip() == '' or str(val).strip().lower() == 'nan':
                     continue
-                # 값이 있는 대상자 발견
-                # found_type = dtype_to_type_str(col_series.dtype) # 값을 dtype 변환값 사용할 때
-                found_type = str(val).strip() # ✅ 실제 셀 값 사용
+                # 값이 있는 첫 번째 대상자의 실제 셀 값을 그대로 사용
+                found_type = str(val).strip()
                 if subjid_col_raw is not None:
                     subj_val = df[subjid_col_raw].iloc[idx]
                     found_subjid = str(subj_val).strip() if pd.notna(subj_val) else ''
-                break  # 첫 번째 유효 대상자만 사용
+                break
 
             records.append({
-                'DOMAIN'  : domain,
-                'ITEM ID' : item_id,
-                'DS_TYPE' : found_type,    # Dataset에서 추출한 Type
-                'DS_SUBJID': found_subjid, # 참조 대상자 ID
+                'DOMAIN'   : domain,
+                'ITEM ID'  : item_id,
+                'DS_TYPE'  : found_type,
+                'DS_SUBJID': found_subjid,
             })
 
     return pd.DataFrame(records)
@@ -728,7 +706,7 @@ if doc_file_up and edc_file_up:
             # ── Data Structure: Dataset Long format 변환 ──────
             df_dataset_long = None
             if dataset_ready:
-                df_dataset_long = build_dataset_long(dataset_excel, DATASET_META_COLUMNS)
+                df_dataset_long = build_dataset_long(dataset_excel)
                 st.write(
                     f"🔄 CDMS Dataset 변환 - 완료 "
                     f"(총 **{len(df_dataset_long)}개** Domain-Item ID 조합 추출)"
