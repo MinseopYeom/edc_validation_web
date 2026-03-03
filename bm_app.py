@@ -23,8 +23,6 @@ SYS_LAYOUT_WHITELIST = [
     # "SITEID",  # 예시: 추후 추가할 경우 이런 식으로 등록
 ]
 
-
-
 st.markdown("""
     <style>
     .stApp { background-color: #F4F7F6; color: #333333; }
@@ -81,9 +79,9 @@ def load_excel_file(file):
 
 
 def get_dynamic_preview(excel_file, sheet_name, header_row):
-    """사용자가 선택한 행을 헤더로 적용하여 미리보기 생성"""
+    """사용자가 선택한 행을 헤더로 적용하여 10개 미리보기 생성"""
     try:
-        return pd.read_excel(excel_file, sheet_name=sheet_name, header=header_row, nrows=5, dtype=str)
+        return pd.read_excel(excel_file, sheet_name=sheet_name, header=header_row, nrows=10, dtype=str)
     except Exception:
         return pd.DataFrame()
 
@@ -174,7 +172,7 @@ def process_data_final(excel_file, sheet_name, header_row):
 
 
 # ============================================================
-# 3. [신규] Data Structure Validation 관련 함수
+# 3. Data Structure Validation 관련 함수
 # ============================================================
 
 def parse_item_id(col_name: str) -> str:
@@ -559,6 +557,7 @@ with col2:
 st.info("실시간 프리뷰를 통해 컬럼이 올바르게 인식되는지 확인 후 검증을 시작하세요.")
 
 # ── 파일 업로더 3개 ───────────────────────────────────────────
+# DB spec 문서, CDMS DB spec, CDMS dataset
 col_u1, col_u2, col_u3 = st.columns(3)
 with col_u1:
     doc_file_up = st.file_uploader("📂 기준 문서 (DB Spec)", type=['xlsx', 'xls'], key="doc")
